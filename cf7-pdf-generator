@@ -1,0 +1,79 @@
+<?php
+/**
+ * Plugin Name: Contact Form 7 PDF Generator
+ * Description: Generates a PDF from Contact Form 7 submissions and attaches it to the email.
+ * Version: 1.1
+ * Author: Emran Shaikh
+ * License: GPLv2 or later
+ */
+
+// Exit if accessed directly
+if (!defined('ABSPATH')) {
+    exit;
+}
+
+// Include Dompdf library
+require_once plugin_dir_path(__FILE__) . 'dompdf/autoload.inc.php';
+
+use Dompdf\Dompdf;
+
+// Hook into Contact Form 7 before sending email to generate PDF
+add_action('wpcf7_before_send_mail', 'generate_pdf_attachment');
+
+function generate_pdf_attachment($contact_form) {
+    $submission = WPCF7_Submission::get_instance();
+
+    if ($submission) {
+        // Get submitted data
+        $posted_data = $submission->get_posted_data();
+
+        // Instantiate Dompdf
+        $dompdf = new Dompdf();
+
+        // Create the HTML for the PDF
+        $html = '<h1>Form Submission</h1>';
+        foreach ($posted_data as $key => $value) {
+            $html .= "<p><strong>$key:</strong> $value</p>";
+        }
+
+        // Load the HTML into Dompdf
+        $dompdf->loadHtml($html);
+
+        // Set paper size and orientation
+        $dompdf->setPaper('A4', 'portrait');
+
+        // Render the PDF
+        $dompdf->render();
+
+        // Save the PDF to the uploads directory
+        $upload_dir = wp_upload_dir();
+        $pdf_path = $upload_dir['path'] . '/form-submission.pdf';
+        file_put_contents($pdf_path, $dompdf->output());
+
+        // Store the PDF path for use in the email attachment
+        $GLOBALS['generated_pdf_path'] = $pdf_path;
+    }
+}
+
+// Attach the generated PDF to the Contact Form 7 email
+add_filter('wpcf7_mail_components', 'attach_generated_pdf', 10, 3);
+
+function attach_generated_pdf($mail_components, $contact_form, $mail_object) {
+    // Check if a PDF has been generated
+    if (isset($GLOBALS['generated_pdf_path'])) {
+        // Attach the generated PDF to the email
+        $mail_components['attachments'][] = $GLOBALS['generated_pdf_path'];
+    }
+    
+    return $mail_components;
+}
+
+// Cleanup the generated PDF file after sending the email
+add_action('wpcf7_mail_sent', 'cleanup_pdf_file');
+
+function cleanup_pdf_file() {
+    if (isset($GLOBALS['generated_pdf_path']) && file_exists($GLOBALS['generated_pdf_path'])) {
+        unlink($GLOBALS['generated_pdf_path']); // Delete the file after sending the email
+    }
+}
+
